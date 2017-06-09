@@ -1,18 +1,36 @@
-FROM alpine:latest
-MAINTAINER d@d.ru
- 
-RUN apk update && apk add dcron wget rsync ca-certificates && rm -rf /var/cache/apk/*
+FROM docker:17.03
 
-RUN apk add --no-cache python3 && \
-    python3 -m ensurepip && \
-    rm -r /usr/lib/python*/ensurepip && \
-    pip3 install --upgrade pip setuptools && \
-    if [ ! -e /usr/bin/pip ]; then ln -s pip3 /usr/bin/pip ; fi && \
-    rm -r /root/.cache
+# https://github.com/docker/docker/blob/master/project/PACKAGERS.md#runtime-dependencies
+RUN apk add --no-cache \
+		btrfs-progs \
+		e2fsprogs \
+		e2fsprogs-extra \
+		iptables \
+		xfsprogs \
+		xz
 
-RUN mkdir -p /var/log/cron && mkdir -m 0644 -p /var/spool/cron/crontabs && touch /var/log/cron/cron.log && mkdir -m 0644 -p /etc/cron.d
+# TODO aufs-tools
 
-COPY /scripts/* /
+# set up subuid/subgid so that "--userns-remap=default" works out-of-the-box
+RUN set -x \
+	&& addgroup -S dockremap \
+	&& adduser -S -G dockremap dockremap \
+	&& echo 'dockremap:165536:65536' >> /etc/subuid \
+	&& echo 'dockremap:165536:65536' >> /etc/subgid
 
-ENTRYPOINT ["/docker-entry.sh"]
-CMD ["/docker-cmd.sh"]
+ENV DIND_COMMIT 3b5fac462d21ca164b3778647420016315289034
+
+RUN set -ex; \
+	apk add --no-cache --virtual .fetch-deps libressl; \
+	wget -O /usr/local/bin/dind "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind"; \
+	chmod +x /usr/local/bin/dind; \
+	apk del .fetch-deps
+
+COPY dockerd-entrypoint.sh docker-cmd.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/dockerd-entrypoint.sh /usr/local/bin/docker-cmd.sh
+
+VOLUME /var/lib/docker
+EXPOSE 2375
+
+ENTRYPOINT ["docker-cmd.sh"]
+CMD []
